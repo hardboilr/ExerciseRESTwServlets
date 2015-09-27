@@ -2,10 +2,16 @@ package servlets;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.io.IOException;
+import java.io.PrintWriter;
+import static java.lang.Integer.parseInt;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
+import java.util.Scanner;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.HttpServlet;
@@ -18,6 +24,12 @@ import javax.servlet.http.HttpServletResponse;
 @WebServlet(name = "Rest", urlPatterns = {"/api/quote/*"})
 public class Rest extends HttpServlet {
 
+    private final String NO_EXIST = "Quote does not exist";
+    private final String INVALID_ID = "Invalid id";
+    Scanner jsonScanner;
+    JsonObject quoteObj;
+    String jsonResponse = "";
+
     private Map<Integer, String> quotes = new HashMap() {
         {
             put(1, "Friends are kisses blown to us by angels");
@@ -28,59 +40,133 @@ public class Rest extends HttpServlet {
 
     @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        System.out.println("doGet");
-        //checks if request is random or by id 
-        String[] parts = request.getRequestURI().split("/");
+        String stringId = request.getParameter("id");
+        jsonResponse = "";
 
-        if (parts.length == 5) {
-            String parameter = parts[4];
+        if (stringId.equals("random")) {
+            //get random quote
+            Random random = new Random();
+            int randomId = random.nextInt(quotes.size() - 1) + 1;
+            String randomQuote = quotes.get(randomId);
+            quoteObj = new JsonObject();
+            quoteObj.addProperty("quote", randomQuote);
+            jsonResponse = new Gson().toJson(quoteObj);
+        } else {
+            //assume its an id, get by id
             int id = 0;
             try {
-                id = Integer.parseInt(parameter);
+                id = Integer.parseInt(stringId);
+                if (quotes.containsKey(id) && id != 0) {
+                    String quote = quotes.get(id);
+                    quoteObj = new JsonObject();
+                    quoteObj.addProperty("quote", quote);
+                    jsonResponse = new Gson().toJson(quoteObj);
+                } else {
+                    String quote = NO_EXIST;
+                    quoteObj = new JsonObject();
+                    quoteObj.addProperty("quote", quote);
+                    jsonResponse = new Gson().toJson(quoteObj);
+
+                }
             } catch (NumberFormatException | NullPointerException e) {
-                //its a string, get random,
-                Random random = new Random();
-                int randomId = random.nextInt(quotes.size()) + 1;
-                String randomQuote = formatQuote(quotes.get(randomId));
-                request.setAttribute("quote", randomQuote);
-                request.getRequestDispatcher("/index.jsp").forward(request, response);
+                //its a string, get index 0 quote
+                String quote = INVALID_ID;
+                quoteObj = new JsonObject();
+                quoteObj.addProperty("quote", quote);
+                jsonResponse = new Gson().toJson(quoteObj);
             }
-            //its an id, get by id
-            if (quotes.containsKey(id)) {
-                String quote = formatQuote(quotes.get(id));
-                request.setAttribute("quote", quote);
-                request.getRequestDispatcher("/index.jsp").forward(request, response);
-            }
+
         }
+        //send jSon
+        sendJson(response, jsonResponse);
     }
 
     @Override
     protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        System.out.println("doPost");
-        
-        JsonObject quote = new JsonObject();
-        int key = 1; //Get the second quote 
-        quote.addProperty("quote", quotes.get(key));
-        String jsonResponse = new Gson().toJson(quote);
-    }
+        try {
+            jsonScanner = new Scanner(request.getInputStream());
+        } catch (IOException ex) {
+            Logger.getLogger(Rest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        String json = "";
+        while (jsonScanner.hasNext()) {
+            json += jsonScanner.nextLine();
+        }
+        JsonObject newQuote = new JsonParser().parse(json).getAsJsonObject();
+        String quote = newQuote.get("quote").getAsString();
 
-    @Override
-    public String getServletInfo() {
-        return "Short description";
+        int id = 0;
+        boolean foundEmpty = false;
+        for (Map.Entry<Integer, String> entry : quotes.entrySet()) {
+            id = entry.getKey();
+            String value = entry.getValue();
+            if (value.equals("")) { //found empty spot 
+                quotes.put(id, quote);
+                foundEmpty = true;
+            }
+        }
+        if (!foundEmpty) {
+            id = quotes.size() + 1;
+            quotes.put(id, quote);
+        }
+
+        //Response
+        quoteObj = new JsonObject();
+        quoteObj.addProperty("id", id);
+        quoteObj.addProperty("quote", quote);
+        jsonResponse = new Gson().toJson(quoteObj);
+        sendJson(response, jsonResponse);
+
     }
 
     @Override
     public void doPut(HttpServletRequest request, HttpServletResponse response) {
+        String stringId = request.getParameter("id");
+        int id = parseInt(stringId);
+        try {
+            jsonScanner = new Scanner(request.getInputStream());
+        } catch (IOException ex) {
+            Logger.getLogger(Rest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        String json = "";
+        while (jsonScanner.hasNext()) {
+            json += jsonScanner.nextLine();
+        }
+        JsonObject newQuote = new JsonParser().parse(json).getAsJsonObject();
+        String quote = newQuote.get("quote").getAsString();
+        quotes.put(id, quote);
 
+        //Response
+        quoteObj = new JsonObject();
+        quoteObj.addProperty("id", id);
+        quoteObj.addProperty("quote", quote);
+        jsonResponse = new Gson().toJson(quoteObj);
+        sendJson(response, jsonResponse);
     }
 
     @Override
     public void doDelete(HttpServletRequest request, HttpServletResponse response) {
+        String stringId = request.getParameter("id");
+        int id = parseInt(stringId);
+        String quote = quotes.get(id);
+        quotes.put(id, "");
 
+        //Response
+        quoteObj = new JsonObject();
+        quoteObj.addProperty("quote", quote);
+        jsonResponse = new Gson().toJson(quoteObj);
+        sendJson(response, jsonResponse);
     }
 
-    private String formatQuote(String input) {
-        String formattedString = "quote : " + input;
-        return formattedString;
+    private void sendJson(HttpServletResponse response, String jSonString) {
+        response.setContentType(
+                "application/json");
+        try (PrintWriter pw = response.getWriter()) {
+            pw.print(jSonString);
+            System.out.println("Response was: " + jSonString);
+            pw.flush();
+        } catch (IOException ex) {
+            Logger.getLogger(Rest.class.getName()).log(Level.SEVERE, null, ex);
+        }
     }
 }
